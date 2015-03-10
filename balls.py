@@ -6,8 +6,13 @@ import random
 
 SIZE = 640, 480
 
+def plus(a): return a[0] + a[1]
+
 def intn(*arg):
     return map(int,arg)
+
+def binop(op, a, b):
+    return map(op, zip(a,b))
 
 def Init(sz):
     '''Turn PyGame on'''
@@ -43,15 +48,16 @@ class GameMode:
 class Ball:
     '''Simple ball class'''
 
-    def __init__(self, filename, pos = (0.0, 0.0), speed = (0.0, 0.0)):
+    def __init__(self, filename, pos = (0.0, 0.0), speed = (0.0, 0.0), gravity = 0.0):
         '''Create a ball from image'''
         self.fname = filename
         self.surface = pygame.image.load(filename)
         self.rect = self.surface.get_rect()
         self.speed = speed
         self.pos = pos
-        self.newpos = pos
+        self.oldpos = pos
         self.active = True
+        self.gravity = gravity
 
     def draw(self, surface):
         surface.blit(self.surface, self.rect)
@@ -59,6 +65,7 @@ class Ball:
     def action(self):
         '''Proceed some action'''
         if self.active:
+            self.oldpos = self.pos
             self.pos = self.pos[0]+self.speed[0], self.pos[1]+self.speed[1]
 
     def logic(self, surface):
@@ -77,9 +84,37 @@ class Ball:
             y = surface.get_height() - self.rect.height/2
             dy = -dy
         self.pos = x,y
-        self.speed = dx,dy
+        self.speed = (dx,dy + self.gravity)
         self.rect.center = intn(*self.pos)
+class RotatingScaleBall(Ball):
+    def __init__(self, filename, pos = (0.0, 0.0), scale = 1.0, speed = (0.0, 0.0), rotSpeed = 0.0, gravity = 0.0):
+        Ball.__init__(self, filename, pos, speed, gravity)
+        self.rect.w, self.rect.h = self.rect.w * scale, self.rect.h * scale
+        self.rect.topleft = self.pos
+        self.rotSpeed = rotSpeed
+        self.angle = 0.0
+        self.scale = scale
+    def action(self):
+        Ball.action(self)
+        if self.active:
+            self.angle += self.rotSpeed
+    def draw(self, surface):
+        newSurf = pygame.transform.rotozoom(self.surface, self.angle,self.scale)
+        newRect = newSurf.get_rect()
+        newRect.center = self.rect.center
+        surface.blit(newSurf, newRect)
 
+class MaskedBall(RotatingScaleBall):
+    def __init__(self, filename, pos = (0.0, 0.0), scale = 1.0, speed = (0.0, 0.0), rotSpeed = 0.0, gravity = 0.0):
+        RotatingScaleBall.__init__(self, filename, pos, scale, speed, rotSpeed, gravity)
+        self.mask = pygame.mask.from_surface(self.surface).scale(self.rect.size)
+   
+    def get_collision_direction(self, other):
+        x, y = other.rect.left - self.rect.left, other.rect.top - self.rect.top
+        othermask = other.mask
+        dx = self.mask.overlap_area(othermask,(x+1,y)) - self.mask.overlap_area(othermask,(x-1,y))
+        dy = self.mask.overlap_area(othermask,(x,y+1)) - self.mask.overlap_area(othermask,(x,y-1))
+        return dx, dy
 class Universe:
     '''Game universe'''
 
@@ -115,14 +150,22 @@ class GameWithObjects(GameMode):
         GameMode.Logic(self, surface)
         for obj in self.objects:
             obj.logic(surface)
-
+        for i in xrange(len(self.objects)):
+            obj1 = self.objects[i]
+            for j in xrange(i + 1, len(self.objects)):
+                obj2 = self.objects[j]
+                dx, dy = obj1.get_collision_direction(obj2)
+                if dx or dy:
+                    obj1.pos = obj1.oldpos
+                    obj2.pos = obj2.oldpos
+                    obj1.speed = binop(plus, obj1.speed, (dx/5.0,dy/5.0))
+                    obj2.speed = binop(plus, obj2.speed, (-dx/5.0, -dy/5.0)) 
     def Draw(self, surface):
         GameMode.Draw(self, surface)
         for obj in self.objects:
             obj.draw(surface)
 
 class GameWithDnD(GameWithObjects):
-
     def __init__(self, *argp, **argn):
         GameWithObjects.__init__(self, *argp, **argn)
         self.oldpos = 0,0
@@ -139,19 +182,19 @@ class GameWithDnD(GameWithObjects):
                 if self.drag:
                     self.drag.pos = event.pos
                     self.drag.speed = event.rel
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.drag is not None:
             self.drag.active = True
             self.drag = None
         GameWithObjects.Events(self, event)
 
 Init(SIZE)
-Game = Universe(50)
+Game = Universe(25)
 
 Run = GameWithDnD()
-for i in xrange(5):
+for i in xrange(3):
     x, y = random.randrange(screenrect.w), random.randrange(screenrect.h)
     dx, dy = 1+random.random()*5, 1+random.random()*5
-    Run.objects.append(Ball("ball.gif",(x,y),(dx,dy)))
+    Run.objects.append(MaskedBall("ball.gif",(x,y), random.random() + 0.6, (dx,dy), 1, 0.25))
 
 Game.Start()
 Run.Init()
