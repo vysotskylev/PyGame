@@ -3,6 +3,7 @@
 
 import pygame
 import random
+import math
 
 SIZE = 640, 480
 
@@ -13,6 +14,14 @@ def intn(*arg):
 
 def binop(op, a, b):
     return map(op, zip(a,b))
+
+def dot(a,b): return a[0]*b[0] + a[1]*b[1]
+def normalize(v):
+    l = v[0] ** 2 + v[1] ** 2
+    if l < 0.00001:
+        return v
+    l = math.sqrt(l)
+    return (v[0] / l, v[1] / l)
 
 def Init(sz):
     '''Turn PyGame on'''
@@ -115,6 +124,30 @@ class MaskedBall(RotatingScaleBall):
         dx = self.mask.overlap_area(othermask,(x+1,y)) - self.mask.overlap_area(othermask,(x-1,y))
         dy = self.mask.overlap_area(othermask,(x,y+1)) - self.mask.overlap_area(othermask,(x,y-1))
         return dx, dy
+
+class MassiveBall(MaskedBall):
+    density = 0.1
+    @staticmethod
+    def get_speeds_after_collision(b1, b2, colDir):
+        # special convinient coordinate system...
+        X = normalize(colDir)
+        Y = (-X[1], X[0])
+        # .. and casting to it ...
+        v1 = (dot(b1.speed, X), dot(b1.speed, Y))
+        v2 = (dot(b2.speed, X), dot(b2.speed, Y))
+        # .. calculating new speeds ...
+        dpMag = 2 * (v2[0] - v1[0]) / (1.0/b1.mass + 1.0/b2.mass)
+        w1 = (v1[0] + dpMag / b1.mass, v1[1])
+        w2 = (v2[0] - dpMag / b2.mass, v2[1])
+        #... and casting back...
+        sp1 = (X[0] * w1[0] + Y[0] * w1[1], X[1] * w1[0] + Y[1] *w1[1])
+        sp2 = (X[0] * w2[0] + Y[0] * w2[1], X[1] * w2[0] + Y[1] *w2[1])
+        return (sp1, sp2)
+
+
+    def __init__(self, filename, pos = (0.0, 0.0), scale = 1.0, speed = (0.0, 0.0), rotSpeed = 0.0, gravity = 0.0):
+        MaskedBall.__init__(self, filename, pos, scale, speed, rotSpeed, gravity)
+        self.mass = scale ** 2 * MassiveBall.density
 class Universe:
     '''Game universe'''
 
@@ -158,8 +191,7 @@ class GameWithObjects(GameMode):
                 if dx or dy:
                     obj1.pos = obj1.oldpos
                     obj2.pos = obj2.oldpos
-                    obj1.speed = binop(plus, obj1.speed, (dx/5.0,dy/5.0))
-                    obj2.speed = binop(plus, obj2.speed, (-dx/5.0, -dy/5.0)) 
+                    obj1.speed, obj2.speed = MassiveBall.get_speeds_after_collision(obj1, obj2, (dx, dy))
     def Draw(self, surface):
         GameMode.Draw(self, surface)
         for obj in self.objects:
@@ -194,7 +226,7 @@ Run = GameWithDnD()
 for i in xrange(3):
     x, y = random.randrange(screenrect.w), random.randrange(screenrect.h)
     dx, dy = 1+random.random()*5, 1+random.random()*5
-    Run.objects.append(MaskedBall("ball.gif",(x,y), random.random() + 0.6, (dx,dy), 1, 0.25))
+    Run.objects.append(MassiveBall("ball.gif",(x,y), random.random() + 0.6, (dx,dy), 1, 0.25))
 
 Game.Start()
 Run.Init()
